@@ -35,14 +35,17 @@
 </p>
 
 <div style="margin-top: 14px;">
+  <a href="README_zh.md" style="background-color: #424242; color: white; padding: 9px 16px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 0 6px; display: inline-block;">
+    🇨🇳 中文说明
+  </a>
   <a href="https://tool-genesis.github.io" style="background-color: #2f6fd6; color: white; padding: 9px 16px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 0 6px; display: inline-block;">
-    Project Page
+    🌐 Project Page
   </a>
   <a href="#quick-start" style="background-color: #1e88e5; color: white; padding: 9px 16px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 0 6px; display: inline-block;">
-    Quick Start
+    ⚡ Quick Start
   </a>
   <a href="#data-coverage" style="background-color: #455a64; color: white; padding: 9px 16px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 0 6px; display: inline-block;">
-    Data And Results
+    📊 Data And Results
   </a>
 </div>
 
