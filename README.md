@@ -229,7 +229,7 @@ python scripts/run_benchmark/summarize_results.py --path temp/eval_results_v3
 | Domain classes | 24 |
 | Label classes | 18 |
 | Unit tests | 9441 |
-| Total tasks | 1720 |
+| Total tasks | 2150 |
 | Average task length | 53 |
 | Average step length | 6 |
 | Average tool-using length | 3 |
@@ -245,45 +245,15 @@ python scripts/run_benchmark/summarize_results.py --path temp/eval_results_v3
 
 ## Data Coverage
 
-<!-- Replace with your figure when ready: ![overview](assets/figure_dataset_overview.png) -->
+![Tool-Genesis dataset overview](assets/figure_dataset_overview.png)
 
-| Domain | Servers | Tools | Tasks |
-|---|---:|---:|---:|
-| Web Search & Research | 10 | 52 | 200 |
-| Data Analysis & Processing | 10 | 50 | 200 |
-| Development Tools | 9 | 29 | 180 |
-| AI/ML Tools | 5 | 23 | 100 |
-| Weather | 4 | 17 | 80 |
-| Gaming | 4 | 33 | 80 |
-| Operating System | 4 | 32 | 80 |
-| Content Creation | 4 | 10 | 80 |
-| Financial Services & Crypto | 6 | 62 | 120 |
-| Other (14 domains) | 30 | 200 | 600 |
-| **Total** | **86** | **508** | **1,720** |
+*Figure: Overview statistics of Tool-Genesis. Left: domain coverage of MCP servers across 24 domain classes. Right: dataset scale and task/trajectory statistics.*
 
 ## Main Results
 
-<!-- Replace with your figure when ready: ![results](assets/table_main_results.png) -->
+![Tool-Genesis main results](assets/table_main_results.png)
 
-### Direct (single-call generation)
-
-| Model | Compliance | Exec. | Schema-F1 | UT\_soft |
-|---|---:|---:|---:|---:|
-| GPT-5.1 | 0.855 | 0.759 | 0.713 | 0.291 |
-| GPT-4.1 | 0.881 | 0.738 | 0.691 | 0.267 |
-| Qwen3-235B | 0.874 | 0.333 | 0.316 | 0.142 |
-| Claude Sonnet 4 | — | — | — | — |
-| Qwen3-8B-SFT | 0.826 | 0.047 | 0.046 | 0.017 |
-| Qwen3-8B | 0.686 | 0.012 | 0.011 | 0.001 |
-
-### Coder-Agent (iterative with sandbox)
-
-| Model | Compliance | Exec. | Schema-F1 | UT\_soft |
-|---|---:|---:|---:|---:|
-| Qwen3-235B | 0.868 | 0.971 | 0.914 | 0.459 |
-| GPT-5.1 | 0.906 | 0.941 | 0.877 | 0.426 |
-| GPT-4.1 | 0.884 | 0.756 | 0.691 | 0.288 |
-| Qwen3-8B | 0.776 | 0.694 | 0.653 | 0.246 |
+*Table: Main results under two evaluation paradigms (Direct and Code-Agent). Metrics include L1 compliance/execution, L2 schema fidelity, L3 unit-test correctness, and L4 downstream utility.*
 
 ## Generation Strategies
 
