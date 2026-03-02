@@ -1,5 +1,5 @@
 <h1 align="center">
-  <b>Tool-Genesis: A Task-Driven Tool Creation Benchmark for Self-Evolving Language Agent</b>
+  ⚙️ <b>Tool-Genesis: A Task-Driven Tool Creation Benchmark for Self-Evolving Language Agent</b>
 </h1>
 
 <div align="center">
