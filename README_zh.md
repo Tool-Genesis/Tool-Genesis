@@ -5,6 +5,8 @@
 <div align="center">
 
 [![项目主页](https://img.shields.io/badge/Project-Website-1f6feb?style=flat-square)](https://tool-genesis.github.io)
+[![arXiv](https://img.shields.io/badge/arXiv-2603.05578-b31b1b?style=flat-square)](https://arxiv.org/abs/2603.05578)
+[![PDF](https://img.shields.io/badge/PDF-下载-ec407a?style=flat-square)](https://arxiv.org/pdf/2603.05578)
 [![数据集](https://img.shields.io/badge/Hugging%20Face-Dataset-ffbf00?style=flat-square)](https://huggingface.co/datasets/tool-genesis/Tool-Genesis-Benchmark)
 [![模型](https://img.shields.io/badge/Hugging%20Face-Model-f59f00?style=flat-square)](https://huggingface.co/tool-genesis/Tool-Genesis-Qwen3-8B-SFT)
 [![Stars][star-image]][star-url]
