@@ -170,8 +170,8 @@ class GTResolver:
                 slug = self._san_slug(k)
                 if isinstance(v, dict):
                     obj = v
-                    if "tools" not in obj:
-                        obj = {"tools": obj.get("tools", [])}
+                    if "tools" not in obj and "tool_definitions" not in obj:
+                        obj = {"tools": obj.get("tools", []), "tool_definitions": obj.get("tool_definitions", [])}
                     self._index[slug] = obj
                     self._index[str(k)] = obj
 
@@ -203,7 +203,7 @@ class GTResolver:
         if not isinstance(obj, dict):
             return None
         return {
-            "tools": obj.get("tool_definitions", []),
+            "tools": obj.get("tool_definitions") or obj.get("tools", []),
             "stateful": obj.get("stateful", []),
             "stateless": obj.get("stateless", []),
             "execution_logs": obj.get("execution_logs", []),

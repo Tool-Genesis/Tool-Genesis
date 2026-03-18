@@ -400,7 +400,12 @@ def semantic_fidelity_score(entry: Dict[str, Any],
     text_a = _flatten_scheme_text(entry)
     text_b = code_path.read_text(encoding="utf-8", errors="ignore")
     text_b = extract_tool_defs(text_b)
-    emb_a, emb_b = call_embedding([text_a, text_b], model=model)
+    result = call_embedding([text_a, text_b], model=model)
+    if not isinstance(result, (list, tuple)) or len(result) < 2:
+        return 0.0
+    emb_a, emb_b = result[0], result[1]
+    if not emb_a or not emb_b:
+        return 0.0
     dot = sum(a*b for a, b in zip(emb_a, emb_b))
     norm_a = math.sqrt(sum(a*a for a in emb_a))
     norm_b = math.sqrt(sum(b*b for b in emb_b))
@@ -622,7 +627,7 @@ def truthfulness_score_and_details(
             for t in server_entry.get("tools", [])
         ]
     # 5) Ensure every tool has an entry
-    by_tool = {j["tool"]: j for j in judgements}
+    by_tool = {j.get("tool", ""): j for j in judgements if isinstance(j, dict)}
     details: List[Dict[str, Any]] = []
     total_score = 0.0
 
@@ -633,8 +638,9 @@ def truthfulness_score_and_details(
             "score": 0.0,
             "reason":"No judgement from LLM"
         })
-        # coerce numeric
-        rec["score"] = float(rec.get("score", 0.0)) / 5.0
+        # coerce numeric and clamp to [0, 5] before normalization
+        raw_score = max(0.0, min(5.0, float(rec.get("score", 0.0))))
+        rec["score"] = raw_score / 5.0
         total_score += rec["score"]
         details.append(rec)
 

@@ -588,8 +588,22 @@ def l2_semantic_correctness_metrics(
         print(tool_map)
         print(arg_map)
 
-    tk = MCPServerToolsToolkit(server_names=server_name.strip(), registry_path=registry_path)
-    tk.initialize_servers()
+    try:
+        tk = MCPServerToolsToolkit(server_names=server_name.strip(), registry_path=registry_path)
+        tk.initialize_servers()
+    except Exception as e:
+        return tool_map, {
+            "schema_f1": schema_f1,
+            "tool_call_success_rate_soft": 0.0,
+            "tool_call_success_rate_hard": 0.0,
+            "trajectory_level_validation_rate_soft": 0.0,
+            "trajectory_level_validation_rate_hard": 0.0,
+        },{
+            "schema": schema_debug,
+            "unit_tests": {"soft_avg": 0.0, "hard_rate": 0.0, "details": []},
+            "trajectory": {"soft_avg": 0.0, "hard_rate": 0.0, "details": []},
+            "error": f"Server startup failed: {e}",
+        }
     ok, active_servers, recovery = _ensure_server_active(tk, server_name.strip())
     if not ok:
         tk.cleanup()
@@ -627,7 +641,12 @@ def l2_semantic_correctness_metrics(
         print(f"unit_soft: {unit_soft}, unit_hard: {unit_hard}")
     traj_score, _t = execute_task.get_execute_task_result()
     traj_soft = float(traj_score)
-    traj_hard = float(traj_score)
+    # Hard rate: fraction of tasks with solved=True (score >= 3)
+    traj_details = _t.get("details", [])
+    if traj_details:
+        traj_hard = sum(1 for d in traj_details if d.get("solved")) / len(traj_details)
+    else:
+        traj_hard = 0.0
     
     tk.cleanup()
     return tool_map, {

@@ -42,6 +42,8 @@ def split_tasks(data: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         # --- unit_test split (per tool) ---
         ut = item.get("unit_test") or {}
+        if not isinstance(ut, dict):
+            ut = {}
         ut_train: Dict[str, List[int]] = {}
         ut_test: Dict[str, List[int]] = {}
         for tool_name, cases in ut.items():
@@ -84,8 +86,9 @@ def main():
     total_test = sum(s["n_test_tasks"] for s in splits.values())
     print(f"Servers: {len(splits)}")
     print(f"Total tasks: {total_train + total_test}")
-    print(f"Train tasks: {total_train} ({total_train / (total_train + total_test) * 100:.1f}%)")
-    print(f"Test tasks:  {total_test} ({total_test / (total_train + total_test) * 100:.1f}%)")
+    total = total_train + total_test
+    print(f"Train tasks: {total_train} ({total_train / total * 100:.1f}%)" if total else f"Train tasks: {total_train}")
+    print(f"Test tasks:  {total_test} ({total_test / total * 100:.1f}%)" if total else f"Test tasks: {total_test}")
 
     # Per-server summary
     for slug, s in list(splits.items())[:3]:

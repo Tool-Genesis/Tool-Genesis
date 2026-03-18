@@ -74,12 +74,17 @@ def analyse_server(l2_debug: dict, gt: dict) -> Dict[str, Any]:
             "extra_tools": [],
         }
 
-    # Matched tool pairs (from bipartite assignment)
+    # Matched tool pairs (from bipartite assignment) — only count above threshold
+    MATCH_THRESHOLD = 0.3
     matched_gt = set()
     matched_pred = set()
     for tm in tool_matches:
-        matched_gt.add(tm.get("gt", ""))
-        matched_pred.add(tm.get("pred", ""))
+        gt_name = tm.get("gt", "")
+        pred_name = tm.get("pred", "")
+        score = tm.get("score", 0)
+        if gt_name and pred_name and score >= MATCH_THRESHOLD:
+            matched_gt.add(gt_name)
+            matched_pred.add(pred_name)
 
     n_matched = len(matched_gt)
 

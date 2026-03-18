@@ -36,14 +36,17 @@ def generate_environment_from_code_agent(
     env_code = ""
     max_retries = 2
     logger.info(f"Generating env code")
-    for _ in range(max_retries):
-        agents["code"].reset()
-        try:
-            env_code_resp = agents["code"].step(env_code_prompt)
-            env_code = extract_code(env_code_resp.content)
-        except Exception:
-            env_code = ""
-        if env_code.strip():
-            break
-    agents["sandbox"].cleanup()
+    try:
+        for _ in range(max_retries):
+            agents["code"].reset()
+            try:
+                env_code_resp = agents["code"].step(env_code_prompt)
+                env_code = extract_code(env_code_resp.content)
+            except Exception as e:
+                logger.warning(f"Code generation attempt failed: {e}")
+                env_code = ""
+            if env_code.strip():
+                break
+    finally:
+        agents["sandbox"].cleanup()
     return tool_schema, env_code

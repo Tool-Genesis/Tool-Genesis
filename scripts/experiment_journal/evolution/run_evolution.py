@@ -103,12 +103,13 @@ def _load_existing_code(
             return f.read()
 
     # Try alternate naming conventions
-    for name in os.listdir(benchmark_root):
-        if model_clean in name and strategy in name:
-            alt_path = os.path.join(benchmark_root, name, server_slug, "env_code.py")
-            if os.path.exists(alt_path):
-                with open(alt_path, "r", encoding="utf-8") as f:
-                    return f.read()
+    if os.path.isdir(benchmark_root):
+        for name in os.listdir(benchmark_root):
+            if model_clean in name and strategy in name:
+                alt_path = os.path.join(benchmark_root, name, server_slug, "env_code.py")
+                if os.path.exists(alt_path):
+                    with open(alt_path, "r", encoding="utf-8") as f:
+                        return f.read()
 
     return None
 
@@ -125,12 +126,13 @@ def _load_existing_schema(
         with open(schema_path, "r", encoding="utf-8") as f:
             return f.read()
 
-    for name in os.listdir(benchmark_root):
-        if model_clean in name and strategy in name:
-            alt_path = os.path.join(benchmark_root, name, server_slug, "tool_schema.json")
-            if os.path.exists(alt_path):
-                with open(alt_path, "r", encoding="utf-8") as f:
-                    return f.read()
+    if os.path.isdir(benchmark_root):
+        for name in os.listdir(benchmark_root):
+            if model_clean in name and strategy in name:
+                alt_path = os.path.join(benchmark_root, name, server_slug, "tool_schema.json")
+                if os.path.exists(alt_path):
+                    with open(alt_path, "r", encoding="utf-8") as f:
+                        return f.read()
 
     return None
 
@@ -147,12 +149,13 @@ def _load_existing_eval(
         with open(l2_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    for name in os.listdir(eval_root):
-        if model_clean in name and strategy in name:
-            alt_path = os.path.join(eval_root, name, "debug", server_slug, "l2_debug.json")
-            if os.path.exists(alt_path):
-                with open(alt_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+    if os.path.isdir(eval_root):
+        for name in os.listdir(eval_root):
+            if model_clean in name and strategy in name:
+                alt_path = os.path.join(eval_root, name, "debug", server_slug, "l2_debug.json")
+                if os.path.exists(alt_path):
+                    with open(alt_path, "r", encoding="utf-8") as f:
+                        return json.load(f)
 
     return None
 
@@ -262,6 +265,7 @@ def evolve_server(
             with open(os.path.join(round_dir, "prompt.json"), "w") as f:
                 json.dump(messages, f, indent=2, ensure_ascii=False)
 
+            response = ""
             try:
                 response = _call_llm(messages, model=model, platform=platform)
                 new_code = _extract_code(response)
@@ -273,7 +277,7 @@ def evolve_server(
             with open(os.path.join(round_dir, "env_code.py"), "w") as f:
                 f.write(new_code)
             with open(os.path.join(round_dir, "llm_response.txt"), "w") as f:
-                f.write(response if 'response' in dir() else "")
+                f.write(response)
 
             code_versions.append(new_code)
 

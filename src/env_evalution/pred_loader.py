@@ -39,6 +39,8 @@ def load_pred_items(pred_path: str) -> List[Dict[str, Any]]:
             return items
         if isinstance(data, list):
             for r in data:
+                if not isinstance(r, dict):
+                    continue
                 sid = r.get("server_id")
                 slug = r.get("server_slug") or r.get("server_name")
                 schema = r.get("json_schema")
@@ -66,6 +68,8 @@ def load_pred_items(pred_path: str) -> List[Dict[str, Any]]:
                     "env_code_path": str(code_path) if isinstance(code_path, str) else None,
                 })
             return items
+    if not root.exists():
+        return items
     for p in root.iterdir():
         if not p.is_dir():
             continue

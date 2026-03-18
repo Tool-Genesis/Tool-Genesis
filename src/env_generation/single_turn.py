@@ -80,8 +80,8 @@ def tool_name(param1: type, param2: type) -> return_type:
    ```python
     if __name__ == "__main__":
         import json
-        COMBINED = "{COMBINED_JSON_PATH}"
-        SERVER   = "{metadata["name"]}"
+        COMBINED = "{{COMBINED_JSON_PATH}}"
+        SERVER   = "{metadata.get('name', 'Unknown')}"
         data = json.load(open(COMBINED, "r", encoding="utf-8"))
         srv  = next(s for s in data["servers"] if s["server_name"] == SERVER)
         tools = srv["tools"]
