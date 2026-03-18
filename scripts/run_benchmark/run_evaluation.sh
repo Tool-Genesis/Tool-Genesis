@@ -78,12 +78,12 @@ is_positive_int() {
   [[ "${1:-}" =~ ^[0-9]+$ ]] && [ "${1}" -ge 1 ]
 }
 
-if ! is_positive_int "${WORKERS}" ]; then
+if ! is_positive_int "${WORKERS}"; then
   echo "WORKERS must be a positive integer, got: ${WORKERS}" >&2
   exit 2
 fi
 
-if ! is_positive_int "${MAX_JOBS}" ]; then
+if ! is_positive_int "${MAX_JOBS}"; then
   echo "MAX_JOBS must be a positive integer, got: ${MAX_JOBS}" >&2
   exit 2
 fi
