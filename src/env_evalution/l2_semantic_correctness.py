@@ -8,9 +8,9 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 logger = logging.getLogger(__name__)
 
-TOOL_MATCH_REQUIRE_THRESHOLD: bool = False
-TOOL_MATCH_THRESHOLD: float = 0.0
-ARG_MATCH_REQUIRE_THRESHOLD: bool = False
+TOOL_MATCH_REQUIRE_THRESHOLD: bool = True
+TOOL_MATCH_THRESHOLD: float = 0.3
+ARG_MATCH_REQUIRE_THRESHOLD: bool = True
 ARG_MATCH_THRESHOLD: float = 0.3
 ENABLE_DEBUG_PRINTS: bool = False
 HARD_MATCH_THRESHOLD: float = 0.7
@@ -140,8 +140,17 @@ def _schema_fidelity(schema: Dict[str, Any], gt_schema: Dict[str, Any]) -> Tuple
     # -------------------------
     # 1) Tool-level matching
     # -------------------------
-    pred_texts = [f"{t['name']} {t['description']}".strip() for t in pred_tools]
-    gt_texts = [f"{t['name']} {t['description']}".strip() for t in gt_tools]
+    def _canon_tool(t: Dict[str, Any]) -> str:
+        """Canonical serialization: name ⊕ canon(args schema), matching paper §A.2."""
+        name = t.get("name", "")
+        args = t.get("args", [])
+        if args:
+            arg_strs = sorted(f"{a['name']}:{a.get('description','')}" for a in args if a.get("name"))
+            return f"{name} {' '.join(arg_strs)}"
+        return name
+
+    pred_texts = [_canon_tool(t) for t in pred_tools]
+    gt_texts = [_canon_tool(t) for t in gt_tools]
     if ENABLE_DEBUG_PRINTS:
         print(pred_texts)
         print(gt_texts)
@@ -233,8 +242,8 @@ def _schema_fidelity(schema: Dict[str, Any], gt_schema: Dict[str, Any]) -> Tuple
                     unmatched_pred_args_global.append(f"P::{p_name}.{an}")
             continue
 
-        p_texts = [f"{a['name']} {a.get('description','')}".strip() for a in p_args]
-        g_texts = [f"{a['name']} {a.get('description','')}".strip() for a in g_args]
+        p_texts = [f"{a['name']} {a.get('description','')}" for a in p_args]
+        g_texts = [f"{a['name']} {a.get('description','')}" for a in g_args]
 
         p_emb = call_embedding(p_texts)
         g_emb = call_embedding(g_texts)
@@ -386,18 +395,63 @@ def _ensure_server_active(tk: MCPServerToolsToolkit, server_name: str) -> Tuple[
 def _tool_call_with_unit_tests(tk: MCPServerToolsToolkit, tool_map: Dict[str, str], arg_map: Dict[str, str], server_name: str, gt_schema: Dict[str, Any], stateful: bool) -> Tuple[float, float, List[Dict[str, Any]]]:
     ut = gt_schema.get("unit_test") or {}
 
-    LAMBDA_STRUCT = 0.8
+    LAMBDA_STRUCT = 0.5  # Paper §A.3: equal weight struct + embed
+
+    def _extract_json_paths(obj: Any, prefix: str = "") -> set:
+        """Recursively extract key-path strings from a JSON object."""
+        paths = set()
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                p = f"{prefix}.{k}" if prefix else k
+                paths.add(p)
+                paths.update(_extract_json_paths(v, p))
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                p = f"{prefix}[{i}]"
+                paths.add(p)
+                paths.update(_extract_json_paths(v, p))
+        return paths
+
     def _structural_judge(actual: str, expected: str) -> Tuple[bool, float]:
-        a = (actual or "").lower()
-        e = (expected or "").lower()
+        """JSON key-path overlap F1 (paper §A.3)."""
+        a_str = (actual or "").strip()
+        e_str = (expected or "").strip()
+
+        # Hard gate: unexpected error tokens
+        a_low = a_str.lower()
+        e_low = e_str.lower()
         fail_tokens = ("error", "failed", "exception", "traceback")
-        if any(t in a for t in fail_tokens) and not any(t in e for t in fail_tokens):
+        if any(t in a_low for t in fail_tokens) and not any(t in e_low for t in fail_tokens):
             return False, 0.0
-        toks = [t for t in ("queued", "success", "created", "updated", "deleted", "layer", "comp", "id", "opacity") if t in e]
-        if not toks:
+
+        # Try to parse both as JSON for key-path F1
+        a_obj, e_obj = None, None
+        try:
+            a_obj = json.loads(a_str)
+        except Exception:
+            pass
+        try:
+            e_obj = json.loads(e_str)
+        except Exception:
+            pass
+
+        if a_obj is not None and e_obj is not None:
+            a_paths = _extract_json_paths(a_obj)
+            e_paths = _extract_json_paths(e_obj)
+            if not a_paths and not e_paths:
+                return True, 1.0
+            if not a_paths or not e_paths:
+                return True, 0.0
+            tp = len(a_paths & e_paths)
+            prec = tp / len(a_paths) if a_paths else 0.0
+            rec = tp / len(e_paths) if e_paths else 0.0
+            f1 = 2 * prec * rec / (prec + rec + 1e-12)
+            return True, f1
+
+        # Fallback for non-JSON: simple text equality check
+        if a_low == e_low:
             return True, 1.0
-        hit = sum(1 for t in toks if t in a)
-        return True, hit / float(len(toks))
+        return True, 0.0
 
     inv_tool_map: Dict[str, str] = {g: p for p, g in tool_map.items()}
     inv_arg_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
@@ -588,22 +642,8 @@ def l2_semantic_correctness_metrics(
         print(tool_map)
         print(arg_map)
 
-    try:
-        tk = MCPServerToolsToolkit(server_names=server_name.strip(), registry_path=registry_path)
-        tk.initialize_servers()
-    except Exception as e:
-        return tool_map, {
-            "schema_f1": schema_f1,
-            "tool_call_success_rate_soft": 0.0,
-            "tool_call_success_rate_hard": 0.0,
-            "trajectory_level_validation_rate_soft": 0.0,
-            "trajectory_level_validation_rate_hard": 0.0,
-        },{
-            "schema": schema_debug,
-            "unit_tests": {"soft_avg": 0.0, "hard_rate": 0.0, "details": []},
-            "trajectory": {"soft_avg": 0.0, "hard_rate": 0.0, "details": []},
-            "error": f"Server startup failed: {e}",
-        }
+    tk = MCPServerToolsToolkit(server_names=server_name.strip(), registry_path=registry_path)
+    tk.initialize_servers()
     ok, active_servers, recovery = _ensure_server_active(tk, server_name.strip())
     if not ok:
         tk.cleanup()
@@ -640,13 +680,11 @@ def l2_semantic_correctness_metrics(
     if ENABLE_DEBUG_PRINTS:
         print(f"unit_soft: {unit_soft}, unit_hard: {unit_hard}")
     traj_score, _t = execute_task.get_execute_task_result()
-    traj_soft = float(traj_score)
-    # Hard rate: fraction of tasks with solved=True (score >= 3)
+    traj_soft = float(traj_score)  # avg(score/5), continuous [0,1]
+    # traj_hard: fraction of tasks with score >= 3 (solved)
     traj_details = _t.get("details", [])
-    if traj_details:
-        traj_hard = sum(1 for d in traj_details if d.get("solved")) / len(traj_details)
-    else:
-        traj_hard = 0.0
+    traj_hard_count = sum(1 for d in traj_details if d.get("solved"))
+    traj_hard = traj_hard_count / len(traj_details) if traj_details else 0.0
     
     tk.cleanup()
     return tool_map, {

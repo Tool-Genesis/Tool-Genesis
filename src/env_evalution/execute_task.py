@@ -185,8 +185,53 @@ class ExecuteTask:
         number_of_tasks = len(self.tasks)
         if number_of_tasks == 0:
             return 0.0, {"details": details}
-        simulation_tasks_judge_score = sum(int(t.score) for t in simulation_tasks_judge) / number_of_tasks
-        # Normalize: map average score (0-5) to [0, 1]
-        score = max(0.0, min(1.0, simulation_tasks_judge_score / 5.0))
 
-        return score, {"details": details}
+        # Per-task scores normalised to [0,1]
+        task_scores = []
+        for t in simulation_tasks_judge:
+            s = max(0.0, min(1.0, int(t.score) / 5.0))
+            task_scores.append(s)
+
+        # soft_avg: mean normalised score
+        soft_avg = sum(task_scores) / number_of_tasks
+        # hard_rate: fraction with score >= 3 (solved)
+        hard_rate = sum(1 for t in simulation_tasks_judge if t.score >= 3) / number_of_tasks
+
+        # Store per-task normalised score in details for oracle-normalised SR
+        for i, d in enumerate(details):
+            if i < len(task_scores):
+                d["normalised_score"] = task_scores[i]
+
+        return soft_avg, {
+            "details": details,
+            "soft_avg": soft_avg,
+            "hard_rate": hard_rate,
+        }
+
+    @staticmethod
+    def oracle_normalized_sr(
+        gen_details: List[Dict[str, Any]],
+        gt_details: List[Dict[str, Any]],
+        eps: float = 1e-6,
+    ) -> float:
+        """Compute oracle-normalized SR per paper §A.4.
+
+        SR_j = (1 - s_gt_j) / (1 - s_gen_j + eps)
+        where s_gen_j and s_gt_j are per-task normalised scores in [0,1].
+
+        Returns dataset-level average SR.
+        """
+        if not gen_details or not gt_details:
+            return 0.0
+        n = min(len(gen_details), len(gt_details))
+        sr_sum = 0.0
+        for j in range(n):
+            s_gen = gen_details[j].get("normalised_score", 0.0)
+            s_gt = gt_details[j].get("normalised_score", 1.0)
+            # Clamp to [0,1]
+            s_gen = max(0.0, min(1.0, s_gen))
+            s_gt = max(0.0, min(1.0, s_gt))
+            sr_j = 1.0 - (1.0 - s_gt) / (1.0 - s_gen + eps)
+            sr_j = max(0.0, min(1.0, sr_j))
+            sr_sum += sr_j
+        return sr_sum / n if n > 0 else 0.0
