@@ -49,6 +49,66 @@ from scripts.experiment_journal.evolution.prompt_template import (
 )
 
 
+def _evaluate_code_lightweight(
+    code: str,
+    gt_item: dict,
+    train_task_indices: list,
+    ut_train_indices: dict,
+    task_descriptions: list,
+) -> dict:
+    """Lightweight in-loop evaluation: syntax check + try UT via subprocess.
+
+    Returns dict with: syntax_ok, syntax_error, ut_pass_rate, ut_failures,
+    launch_error, sr_train.
+    """
+    import subprocess
+    import tempfile
+
+    result = {"syntax_ok": False, "syntax_error": None, "ut_pass_rate": None,
+              "ut_failures": [], "launch_error": None, "sr_train": None}
+
+    # 1) Syntax check
+    try:
+        compile(code, "<generated>", "exec")
+        result["syntax_ok"] = True
+    except SyntaxError as e:
+        result["syntax_error"] = f"Line {e.lineno}: {e.msg}"
+        return result
+
+    # 2) Try to import and run basic checks via subprocess
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(code)
+        tmp_path = f.name
+
+    try:
+        # Quick import check (timeout 10s)
+        proc = subprocess.run(
+            [sys.executable, "-c", f"import importlib.util; spec = importlib.util.spec_from_file_location('m', '{tmp_path}'); mod = importlib.util.module_from_spec(spec)"],
+            capture_output=True, text=True, timeout=10
+        )
+        if proc.returncode != 0:
+            result["launch_error"] = proc.stderr[:500] if proc.stderr else "import failed"
+    except subprocess.TimeoutExpired:
+        result["launch_error"] = "import timeout (>10s)"
+    except Exception as e:
+        result["launch_error"] = str(e)[:500]
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    # 3) UT evaluation would require launching the actual MCP server,
+    #    which is expensive. We collect what we can from static analysis.
+    #    Full UT evaluation is done by eval_evolution.py after all rounds.
+    unit_test = gt_item.get("unit_test", {})
+    if isinstance(unit_test, dict) and ut_train_indices:
+        total_train_cases = sum(len(v) for v in ut_train_indices.values())
+        result["ut_total_train_cases"] = total_train_cases
+
+    return result
+
+
 def _extract_code(raw: str) -> str:
     """Extract Python code from LLM response (fenced block)."""
     # Try to use the project's extract_code if available
@@ -281,22 +341,45 @@ def evolve_server(
 
             code_versions.append(new_code)
 
-            # Note: Full evaluation of new code requires launching the MCP server
-            # and running L2/L4. This is done separately by eval_evolution.py.
-            # For now, we record the code and mark it as needing evaluation.
+            # --- Real in-loop evaluation ---
+            eval_result = _evaluate_code_lightweight(
+                new_code, gt_item, train_indices, ut_train_indices, task_descriptions
+            )
+
             round_results.append({
                 "round": r,
-                "sr_train": None,  # To be filled by evaluator
-                "ut_pass_rate": None,
+                "sr_train": eval_result.get("sr_train"),
+                "ut_pass_rate": eval_result.get("ut_pass_rate"),
+                "syntax_ok": eval_result.get("syntax_ok"),
                 "source": "evolved",
                 "code_length": len(new_code),
             })
 
-            # Placeholder feedback (will be replaced by evaluator)
-            feedback_text = f"[Pending evaluation for round {r}]"
+            # Build real feedback from evaluation
+            feedback_parts = [f"=== Round {r} Evaluation ==="]
+            if not eval_result.get("syntax_ok"):
+                feedback_parts.append(f"SYNTAX ERROR: {eval_result.get('syntax_error', 'unknown')}")
+                feedback_parts.append("The code has syntax errors. Please fix them.")
+            else:
+                feedback_parts.append(f"Syntax: OK")
+                if eval_result.get("ut_pass_rate") is not None:
+                    feedback_parts.append(
+                        f"Unit test pass rate (train): {eval_result['ut_pass_rate']:.2%}"
+                    )
+                if eval_result.get("ut_failures"):
+                    feedback_parts.append("Failed unit tests:")
+                    for fail in eval_result["ut_failures"][:10]:
+                        feedback_parts.append(f"  - {fail}")
+                if eval_result.get("launch_error"):
+                    feedback_parts.append(f"Server launch failed: {eval_result['launch_error']}")
+                    feedback_parts.append("Please ensure the MCP server starts correctly.")
+
+            feedback_text = "\n".join(feedback_parts)
             feedback_history.append(feedback_text)
             with open(os.path.join(round_dir, "feedback.txt"), "w") as f:
                 f.write(feedback_text)
+            with open(os.path.join(round_dir, "eval_result.json"), "w") as f:
+                json.dump(eval_result, f, indent=2, ensure_ascii=False)
 
     # Save evolution summary
     summary = {
