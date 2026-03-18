@@ -88,65 +88,113 @@ def _subclassify_launch(log_lines: List[str]) -> str:
 # L2 classification
 # ---------------------------------------------------------------------------
 
-def classify_l2_schema(l2: dict) -> List[str]:
-    """Classify L2 schema-level errors from l2_debug.json."""
+def classify_l2_schema(l2: dict, gt_tool_defs: List[dict] = None) -> List[str]:
+    """Classify L2 schema-level errors from l2_debug.json.
+
+    gt_tool_defs: optional list of GT tool definitions (from tool_genesis_v3.json)
+                  used to detect arg_missing / arg_extra accurately.
+    """
     errors = []
     schema = l2.get("schema", {})
 
     tool_matches = schema.get("tool_matches", [])
     arg_matches = schema.get("arg_matches", [])
 
-    # Build sets of matched GT / pred tools
+    # --- Tool-level classification ---
+    # Separate matched (score >= threshold) from unmatched pairs
     matched_gt = set()
     matched_pred = set()
+    all_gt_in_matches = set()
+    all_pred_in_matches = set()
     low_score_tools = []
 
     for tm in tool_matches:
         pred = tm.get("pred", "")
         gt = tm.get("gt", "")
         score = tm.get("score", 0)
+        if gt:
+            all_gt_in_matches.add(gt)
+        if pred:
+            all_pred_in_matches.add(pred)
 
         if score >= TOOL_MATCH_THRESHOLD:
             matched_gt.add(gt)
             matched_pred.add(pred)
             if score < DESCRIPTION_DRIFT_THRESHOLD:
                 low_score_tools.append((pred, gt, score))
-        # Tools below threshold remain unmatched
 
-    # Count tool missing / extra from the matches array alone
-    # tool_matches only contains pairs that were assigned by the matcher.
-    # GT tools not present in any match → missing
-    # Pred tools not present in any match → extra
-    gt_tools_in_matches = {tm["gt"] for tm in tool_matches if tm.get("gt")}
-    pred_tools_in_matches = {tm["pred"] for tm in tool_matches if tm.get("pred")}
-
-    # If schema_f1 == 0 and no matches recorded, likely complete mismatch
-    schema_f1 = schema.get("schema_f1", 0)
-    tool_f1 = schema.get("tool_f1", 0)
-
-    if tool_f1 == 0 and len(tool_matches) == 0:
-        # Complete tool mismatch (no GT tool matched)
+    # tool_missing: GT tools that were NOT matched above threshold
+    unmatched_gt = all_gt_in_matches - matched_gt
+    for _ in unmatched_gt:
         errors.append("tool_missing")
 
-    # From matched pairs, identify low-score matches (description drift)
+    # If GT tools known from gt_tool_defs, also count GT tools absent from matches entirely
+    if gt_tool_defs:
+        gt_names = {t.get("name", "") for t in gt_tool_defs if t.get("name")}
+        absent_gt = gt_names - all_gt_in_matches
+        for _ in absent_gt:
+            errors.append("tool_missing")
+
+    # Complete mismatch fallback (no matches at all)
+    tool_f1 = schema.get("tool_f1", 0)
+    if tool_f1 == 0 and len(tool_matches) == 0:
+        errors.append("tool_missing")
+
+    # tool_extra: pred tools in matches but NOT matched above threshold
+    unmatched_pred = all_pred_in_matches - matched_pred
+    for _ in unmatched_pred:
+        errors.append("tool_extra")
+
+    # description_drift: matched tools with low overall score
     for pred, gt, score in low_score_tools:
         errors.append("description_drift")
 
-    # Arg-level analysis
-    gt_args_in_matches = set()
-    pred_args_in_matches = set()
+    # --- Arg-level classification ---
+    # Group arg_matches by matched tool pair
+    matched_gt_args = set()   # "tool.arg" format
+    matched_pred_args = set()
+
     for am in arg_matches:
         pred_arg = am.get("pred", "")
         gt_arg = am.get("gt", "")
         score = am.get("score", 0)
 
-        if pred_arg:
-            pred_args_in_matches.add(pred_arg)
         if gt_arg:
-            gt_args_in_matches.add(gt_arg)
+            matched_gt_args.add(gt_arg)
+        if pred_arg:
+            matched_pred_args.add(pred_arg)
 
         if score < ARG_MATCH_THRESHOLD and pred_arg and gt_arg:
             errors.append("arg_type_error")
+
+    # arg_missing / arg_extra: compare against GT tool definitions if available
+    if gt_tool_defs:
+        for gt_tool in gt_tool_defs:
+            gt_name = gt_tool.get("name", "")
+            if gt_name not in matched_gt:
+                continue  # Tool itself is missing, already counted
+            props = gt_tool.get("input_schema", {}).get("properties", {})
+            for arg_name in props:
+                full = f"{gt_name}.{arg_name}"
+                if full not in matched_gt_args:
+                    errors.append("arg_missing")
+
+    # arg_extra: pred args that have no matched GT counterpart
+    # Detect by checking pred args whose tool is matched but arg has no GT match
+    for pred_arg in matched_pred_args:
+        parts = pred_arg.split(".", 1)
+        if len(parts) != 2:
+            continue
+        pred_tool = parts[0]
+        # Only count if the pred tool was actually matched
+        if pred_tool in matched_pred:
+            # Check if this pred arg has a corresponding GT match
+            has_gt = any(
+                am.get("pred") == pred_arg and am.get("gt") and am.get("score", 0) >= ARG_MATCH_THRESHOLD
+                for am in arg_matches
+            )
+            if not has_gt:
+                errors.append("arg_extra")
 
     return errors
 
@@ -246,14 +294,18 @@ def classify_l4(l2: dict) -> List[str]:
 # Main analysis
 # ---------------------------------------------------------------------------
 
-def analyse_all(results_base: str) -> Tuple[Dict, Dict]:
+def analyse_all(results_base: str, gt_data: Dict[str, List[dict]] = None) -> Tuple[Dict, Dict]:
     """
     Walk through all run directories and produce:
       full_results: {run_name: {server_slug: {l1_errors, l2_errors, ...}}}
       summary:      {run_name: {error_label: count}}
+
+    gt_data: optional {server_slug: [tool_definitions]} for accurate arg classification.
     """
     full_results: Dict[str, Dict[str, Any]] = {}
     summary: Dict[str, Counter] = {}
+    if gt_data is None:
+        gt_data = {}
 
     for run_dir in sorted(os.listdir(results_base)):
         run_path = os.path.join(results_base, run_dir)
@@ -287,7 +339,13 @@ def analyse_all(results_base: str) -> Tuple[Dict, Dict]:
             if os.path.exists(l1_path):
                 with open(l1_path) as f:
                     l1 = json.load(f)
-                entry["l1_errors"] = classify_l1(l1)
+                # Try to extract log lines for launch sub-classification
+                log_lines = l1.get("launch_log") or l1.get("log_lines") or l1.get("stderr")
+                if isinstance(log_lines, str):
+                    log_lines = log_lines.splitlines()
+                elif not isinstance(log_lines, list):
+                    log_lines = None
+                entry["l1_errors"] = classify_l1(l1, log_lines=log_lines)
 
             # --- L2 ---
             l2_path = os.path.join(server_debug, "l2_debug.json")
@@ -295,7 +353,8 @@ def analyse_all(results_base: str) -> Tuple[Dict, Dict]:
             if os.path.exists(l2_path):
                 with open(l2_path) as f:
                     l2 = json.load(f)
-                entry["l2_schema_errors"] = classify_l2_schema(l2)
+                gt_tool_defs = gt_data.get(server, [])
+                entry["l2_schema_errors"] = classify_l2_schema(l2, gt_tool_defs=gt_tool_defs)
                 entry["l2_ut_errors"] = classify_l2_unit_tests(l2)
                 entry["l2_tool_metrics"] = count_l2_tool_metrics(l2)
 
@@ -398,10 +457,26 @@ def main():
         type=str,
         default="data/analysis_c_summary.json",
     )
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default="data/tool_genesis_v3.json",
+        help="Path to GT benchmark data (for arg-level classification)",
+    )
     args = parser.parse_args()
 
+    # Load GT tool definitions for accurate arg classification
+    gt_data: Dict[str, list] = {}
+    if os.path.exists(args.data_path):
+        with open(args.data_path, "r", encoding="utf-8") as f:
+            raw_gt = json.load(f)
+        for item in raw_gt:
+            slug = item.get("server_slug", "")
+            gt_data[slug] = item.get("tool_definitions", [])
+        print(f"Loaded GT data: {len(gt_data)} servers")
+
     print("Scanning eval results...")
-    full_results, summary = analyse_all(args.results_dir)
+    full_results, summary = analyse_all(args.results_dir, gt_data=gt_data)
 
     n_runs = len(full_results)
     n_servers = sum(len(v) for v in full_results.values())

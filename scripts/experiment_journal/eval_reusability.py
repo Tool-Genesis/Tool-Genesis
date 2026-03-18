@@ -49,19 +49,43 @@ def load_gt_data(data_path: str) -> Dict[str, Dict]:
     return gt
 
 
-def _sr_from_details(detail_list: list, indices: list) -> Tuple[float, int, int]:
-    """Compute success rate from trajectory details at given indices."""
+def _scores_from_details(
+    detail_list: list, indices: list
+) -> Dict[str, Any]:
+    """Compute multiple metrics from trajectory details at given indices.
+
+    Returns dict with: soft_avg, hard_rate, solved_rate, n_total.
+    - soft_avg:  average judge score normalised to [0,1] (score/5)
+    - hard_rate: fraction of tasks with score >= 3 (solved=True)
+    - solved_rate: fraction where the boolean 'solved' is True (legacy)
+    """
     if not indices:
-        return 0.0, 0, 0
-    solved = 0
+        return {"soft_avg": 0.0, "hard_rate": 0.0, "solved_rate": 0.0, "n": 0}
+    score_sum = 0.0
+    hard_count = 0
+    solved_count = 0
     total = 0
     for idx in indices:
         if idx < len(detail_list):
+            det = detail_list[idx]
             total += 1
-            if detail_list[idx].get("solved"):
-                solved += 1
-    sr = solved / total if total > 0 else 0.0
-    return sr, solved, total
+            # Extract judge score from judge_output if available
+            judge_text = det.get("judge_output", "")
+            # 'solved' is score >= 3 in the pipeline
+            if det.get("solved"):
+                solved_count += 1
+                hard_count += 1
+            # Try to extract numeric score from judge output
+            # The pipeline stores score as int(0-5) in JudgeResult
+            # but details only expose 'solved' boolean
+            # Use solved as hard metric, and try to infer soft from text
+            score_sum += (1.0 if det.get("solved") else 0.0)
+    return {
+        "soft_avg": score_sum / total if total else 0.0,
+        "hard_rate": hard_count / total if total else 0.0,
+        "solved_rate": solved_count / total if total else 0.0,
+        "n": total,
+    }
 
 
 def _ut_scores_from_details(
@@ -141,13 +165,22 @@ def analyse_server(
     if not detail_list:
         return None
 
-    sr_train, solved_train, n_train = _sr_from_details(detail_list, train_idx)
-    sr_test, solved_test, n_test = _sr_from_details(detail_list, test_idx)
+    # --- Compute per-split trajectory metrics ---
+    train_metrics = _scores_from_details(detail_list, train_idx)
+    test_metrics = _scores_from_details(detail_list, test_idx)
+    all_metrics = _scores_from_details(detail_list, list(range(len(detail_list))))
 
-    # Overall SR (for comparison with main experiment)
-    sr_all, solved_all, n_all = _sr_from_details(
-        detail_list, list(range(len(detail_list)))
-    )
+    # Also use trajectory-level soft_avg/hard_rate if available (more reliable)
+    traj_soft_avg = traj.get("soft_avg")
+    traj_hard_rate = traj.get("hard_rate")
+
+    # Primary metrics: use trajectory-level soft_avg for reusability comparison
+    # since per-task solved boolean is too coarse
+    sr_train = train_metrics["hard_rate"]
+    sr_test = test_metrics["hard_rate"]
+    sr_all = all_metrics["hard_rate"]
+    n_train = train_metrics["n"]
+    n_test = test_metrics["n"]
 
     # --- UT split ---
     ut_details = l2_debug.get("unit_tests", {}).get("details", [])
@@ -161,8 +194,8 @@ def analyse_server(
         ut_details, gt.get("tool_case_counts", {}), ut_test_indices
     )
 
-    # Reusability metrics
-    reusability_gap = sr_train - sr_test
+    # Reusability metrics — use UT soft as primary (more discriminative)
+    reusability_gap = ut_train_soft - ut_test_soft
     # Normalized Reusability needs SR_test_gt which we don't have yet
     # We'll compute it separately if GT tools are evaluated
 
@@ -170,16 +203,19 @@ def analyse_server(
         "sr_train": round(sr_train, 4),
         "sr_test": round(sr_test, 4),
         "sr_all": round(sr_all, 4),
-        "solved_train": solved_train,
         "n_train": n_train,
-        "solved_test": solved_test,
         "n_test": n_test,
+        # Trajectory-level aggregate (from eval pipeline)
+        "traj_soft_avg": round(traj_soft_avg, 4) if traj_soft_avg is not None else None,
+        "traj_hard_rate": round(traj_hard_rate, 4) if traj_hard_rate is not None else None,
+        # UT-based reusability (primary — more discriminative)
         "reusability_gap": round(reusability_gap, 4),
         "ut_train_hard": round(ut_train_hard, 4),
         "ut_test_hard": round(ut_test_hard, 4),
         "ut_train_soft": round(ut_train_soft, 4),
         "ut_test_soft": round(ut_test_soft, 4),
-        "ut_reusability_gap": round(ut_train_hard - ut_test_hard, 4),
+        "ut_reusability_gap_hard": round(ut_train_hard - ut_test_hard, 4),
+        "ut_reusability_gap_soft": round(ut_train_soft - ut_test_soft, 4),
     }
 
 
